@@ -7,12 +7,12 @@ import badger2040
 
 badger2040.system_speed(badger2040.SYSTEM_SLOW)
 
-GPS_UDPATE_RATE = 2  # Request a position fix every 2 seconds
+GPS_UDPATE_RATE = 5  # Request a position fix every 5 seconds
 
 # Create the GPS, set update rate and turn off the flashing green LED
 gps = pa1010.PA1010()
 gps.set_update_rate(GPS_UDPATE_RATE)
-gps.set_pps(True)
+gps.set_pps(False)
 
 # It's nice to have a badger on the Badger
 BADGER_IMAGE = bytearray((88 * 108) // 8)

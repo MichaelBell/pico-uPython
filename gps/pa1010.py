@@ -32,7 +32,7 @@ class PA1010:
             # to the latest state
             while True:
                 self._decode_sentence(self.read_sentence())
-        except GPSTimeoutError:
+        except (OSError, GPSTimeoutError):
             pass
         
         return self.valid
@@ -53,7 +53,30 @@ class PA1010:
         if ms_per_update < 1000:  ms_per_update = 1000
         if ms_per_update > 10000: ms_per_update = 10000
         
-        self.send_command("PMTK300,{},0,0,0,0".format(ms_per_update))
+        self.send_command("PMTK220,{},0,0,0,0".format(ms_per_update))
+
+    def set_periodic_mode(self, seconds_per_update):
+        """Set periodic mode, this sends the module to sleep between navigation updates.
+        Use with seconds_per_update between 15 and 300 seconds."""
+        # Limit to 300s max as we can't easily wake the device again when it's asleep
+        if seconds_per_update < 15: seconds_per_update = 15
+        if seconds_per_update > 300: seconds_per_update = 300
+        
+        ms_per_update = int(seconds_per_update * 1000)
+        short_nav_acquisition = 7000
+        short_nav_sleep = ms_per_update - short_nav_acquisition
+        long_nav_acquisition = 30000
+        long_nav_sleep = short_nav_sleep
+        
+        self.set_update_rate(1)
+        while True:
+            s = self.read_sentence(1000)
+            if s.startswith("$PMTK001,220"):
+                break
+        self.send_command("PMTK225,2,{},{},{},{}".format(short_nav_acquisition, short_nav_sleep, long_nav_acquisition, long_nav_sleep))
+
+    def set_normal_mode(self):
+        self.send_command("PMTK225,0")
 
     def cold_boot(self):
         """Cold boot the module, so it forgets all data that helps it start quickly.
@@ -71,8 +94,25 @@ class PA1010:
         self.satellites = 0
         self.altitude = 0
         
+        # Reset to normal mode
+        # Note that as we don't have access to the serial port we
+        # just have to hang until the device next wakes up if it has been placed in standby mode
+        try:
+            self.set_normal_mode()
+        except OSError:
+            reset = False
+            while not reset:
+                try:
+                    s = self.read_sentence(1000)
+                    if s.startswith("$PMTK010,00") or s.startswith("$G"):
+                        time.sleep(0.1)
+                        self.set_normal_mode()
+                        reset = True
+                except OSError:
+                    time.sleep(0.1)
+
         # Only request GGA and RMC data
-        self.send_command("PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
+        self.send_command("PMTK314,0,1,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
         
     def send_command(self, command, add_checksum=True):
         """Send a command string to the PA1010D.
@@ -105,6 +145,9 @@ class PA1010:
 
             if len(buf) == 0 and char != b'$':
                 continue
+            elif len(buf) == 0:
+                # Started reading a command, give us more time
+                timeout += 100
 
             buf += char
 
